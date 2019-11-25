@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from utils import all_metrics, print_metrics
 
-def train(model, optimizer, epoch, gpu, data_loader):
+def train(args, model, optimizer, epoch, gpu, data_loader):
 
     print("EPOCH %d" % epoch)
 
@@ -17,15 +17,28 @@ def train(model, optimizer, epoch, gpu, data_loader):
     num_iter = len(data_loader)
     for i in range(num_iter):
 
-        inputs_id, labels, positions, text_inputs = next(data_iter)
+        if args.model.find("bert") != -1:
 
-        inputs_id, labels, positions, text_inputs = torch.LongTensor(inputs_id), torch.FloatTensor(labels), \
-                                                   torch.LongTensor(positions), text_inputs
+            inputs_id, segments, masks, labels = next(data_iter)
 
-        if gpu >= 0:
-            inputs_id, labels, positions, text_inputs = inputs_id.cuda(gpu), labels.cuda(gpu), positions.cuda(gpu), text_inputs
+            inputs_id, segments, masks, labels = torch.LongTensor(inputs_id), torch.LongTensor(segments), \
+                                                 torch.LongTensor(masks), torch.FloatTensor(labels)
 
-        output, loss = model(inputs_id, labels, positions, text_inputs)
+            if gpu >= 0:
+                inputs_id, segments, masks, labels = inputs_id.cuda(gpu), segments.cuda(gpu), \
+                                                     masks.cuda(gpu), labels.cuda(gpu)
+
+            output, loss = model(inputs_id, segments, masks, labels)
+        else:
+
+            inputs_id, labels, text_inputs = next(data_iter)
+
+            inputs_id, labels = torch.LongTensor(inputs_id), torch.FloatTensor(labels)
+
+            if gpu >= 0:
+                inputs_id, labels, text_inputs = inputs_id.cuda(gpu), labels.cuda(gpu), text_inputs.cuda(gpu)
+
+            output, loss = model(inputs_id, labels, text_inputs)
 
         optimizer.zero_grad()
         loss.backward()
@@ -35,7 +48,7 @@ def train(model, optimizer, epoch, gpu, data_loader):
 
     return losses
 
-def test(model, data_path, fold, gpu, dicts, data_loader):
+def test(args, model, data_path, fold, gpu, dicts, data_loader):
 
     filename = data_path.replace('train', fold)
     print('file for evaluation: %s' % filename)
@@ -51,16 +64,27 @@ def test(model, data_path, fold, gpu, dicts, data_loader):
     for i in range(num_iter):
         with torch.no_grad():
 
-            inputs_id, labels, positions, text_inputs = next(data_iter)
+            if args.model.find("bert") != -1:
+                inputs_id, segments, masks, labels = next(data_iter)
 
-            inputs_id, labels, positions, text_inputs = torch.LongTensor(inputs_id), torch.FloatTensor(labels), \
-                                                        torch.LongTensor(positions), text_inputs
+                inputs_id, segments, masks, labels = torch.LongTensor(inputs_id), torch.LongTensor(segments), \
+                                                     torch.LongTensor(masks), torch.FloatTensor(labels)
 
-            if gpu >= 0:
-                inputs_id, labels, positions, text_inputs = inputs_id.cuda(gpu), labels.cuda(gpu), positions.cuda(
-                    gpu), text_inputs
+                if gpu >= 0:
+                    inputs_id, segments, masks, labels = inputs_id.cuda(
+                        gpu), segments.cuda(gpu), masks.cuda(gpu), labels.cuda(gpu)
 
-            output, loss = model(inputs_id, labels, positions, text_inputs)
+                output, loss = model(inputs_id, segments, masks, labels)
+            else:
+
+                inputs_id, labels, text_inputs = next(data_iter)
+
+                inputs_id, labels, = torch.LongTensor(inputs_id), torch.FloatTensor(labels)
+
+                if gpu >= 0:
+                    inputs_id, labels, text_inputs = inputs_id.cuda(gpu), labels.cuda(gpu), text_inputs.cuda(gpu)
+
+                output, loss = model(inputs_id, labels, text_inputs)
 
             output = torch.sigmoid(output)
             output = output.data.cpu().numpy()

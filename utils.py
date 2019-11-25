@@ -5,6 +5,8 @@ import csv
 from scipy.sparse import csr_matrix
 import gensim.models.word2vec as w2v
 import gensim.models.fasttext as fasttext
+import codecs
+import re
 
 def gensim_to_embeddings(wv_file, vocab_file, Y, outfile=None):
     model = gensim.models.Word2Vec.load(wv_file)
@@ -425,11 +427,8 @@ def load_vocab_dict(args, vocab_file):
             #     print(line)
             if line != '':
                 vocab.add(line.strip())
-    # hack because the vocabs were created differently for these models
-    if args.public_model and args.Y == 'full' and args.version == "mimic3" and args.model == 'conv_attn':
-        ind2w = {i: w for i, w in enumerate(sorted(vocab))}
-    else:
-        ind2w = {i + 1: w for i, w in enumerate(sorted(vocab))}
+
+    ind2w = {i + 1: w for i, w in enumerate(sorted(vocab))}
     w2ind = {w: i for i, w in ind2w.items()}
 
     return ind2w, w2ind
@@ -462,7 +461,7 @@ def load_full_codes(train_path, mimic2_dir, version='mimic3'):
         ind2c = defaultdict(str, {i:c for i,c in enumerate(sorted(codes))})
     return ind2c
 
-def load_lookups(args, desc_embed=False):
+def load_lookups(args):
 
     ind2w, w2ind = load_vocab_dict(args, args.vocab)
 
@@ -483,26 +482,10 @@ def load_lookups(args, desc_embed=False):
 
     return dicts
 
-def make_param_dict(args):
-    """
-        Make a list of parameters to save for future reference
-    """
-    param_vals = [args.Y, args.filter_size, args.dropout, args.num_filter_maps, args.rnn_dim, args.cell_type, args.rnn_layers,
-                  args.lmbda, args.command, args.weight_decay, args.version, args.data_path, args.vocab, args.embed_file, args.lr]
-    param_names = ["Y", "filter_size", "dropout", "num_filter_maps", "rnn_dim", "cell_type", "rnn_layers", "lmbda", "command",
-                   "weight_decay", "version", "data_path", "vocab", "embed_file", "lr"]
-    params = {name:val for name, val in zip(param_names, param_vals) if val is not None}
-    return params
-
-from collections import Counter
-
 def prepare_instance(dicts, filename, args, max_length):
-    ind2w, w2ind, ind2c, c2ind, dv_dict = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind'], dicts['dv']
+    ind2w, w2ind, ind2c, c2ind = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind']
     instances = []
     num_labels = len(dicts['ind2c'])
-
-    document_num = 0
-    idf = Counter() # key: ind, value: idf
 
     with open(filename, 'r') as infile:
         r = csv.reader(infile)
@@ -511,12 +494,8 @@ def prepare_instance(dicts, filename, args, max_length):
 
         for row in r:
 
-            tf = Counter() # key: ind, value: tf
-
             text = row[2]
-            hadm_id = int(row[1])
 
-            cur_code_set = set()
             labels_idx = np.zeros(num_labels)
             labelled = False
 
@@ -524,7 +503,6 @@ def prepare_instance(dicts, filename, args, max_length):
                 if l in c2ind.keys():
                     code = int(c2ind[l])
                     labels_idx[code] = 1
-                    cur_code_set.add(code)
                     labelled = True
             if not labelled:
                 continue
@@ -543,25 +521,66 @@ def prepare_instance(dicts, filename, args, max_length):
                 tokens = tokens[:max_length]
                 tokens_id = tokens_id[:max_length]
 
-            for token_id in tokens_id:
-                tf[token_id] += 1
-
-            doc_token_num = len(tokens)
-            tfidf = [0] * (len(w2ind) + 2)  # index: word id, value: tfidf, +2 due to "pad is not in w2ind" and "unk"
-            for token_id, tf_ in tf.items():
-                tf[token_id] = tf_*1.0/doc_token_num
-                tfidf[token_id] = tf[token_id]
-                idf[token_id] += 1
-
-            document_num += 1
-
-
-            dict_instance = {'label': labels_idx, 'hadm_id': hadm_id, 'cur_code_set': cur_code_set,
+            dict_instance = {'label': labels_idx,
                                  'tokens': tokens,
                                  "tokens_id": tokens_id}
 
             instances.append(dict_instance)
 
+
+    return instances
+
+from pytorch_pretrained_bert import BertTokenizer
+def prepare_instance_bert(dicts, filename, args, max_length):
+    ind2w, w2ind, ind2c, c2ind = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind']
+    instances = []
+    num_labels = len(dicts['ind2c'])
+
+    wp_tokenizer = BertTokenizer.from_pretrained(args.bert_dir, do_lower_case=True)
+
+    with open(filename, 'r') as infile:
+        r = csv.reader(infile)
+        #header
+        next(r)
+
+        for row in r:
+
+            text = row[2]
+
+            labels_idx = np.zeros(num_labels)
+            labelled = False
+
+            for l in row[3].split(';'):
+                if l in c2ind.keys():
+                    code = int(c2ind[l])
+                    labels_idx[code] = 1
+                    labelled = True
+            if not labelled:
+                continue
+
+            tokens_ = text.split()
+            tokens = []
+            for token in tokens_:
+                if token == '[CLS]' or token == '[SEP]':
+                    continue
+                wps = wp_tokenizer.tokenize(token)
+                tokens.extend(wps)
+
+            tokens_max_len = max_length-2 # for CLS SEP
+            if len(tokens) > tokens_max_len:
+                tokens = tokens[:tokens_max_len]
+
+            tokens.insert(0, '[CLS]')
+            tokens.append('[SEP]')
+
+            tokens_id = wp_tokenizer.convert_tokens_to_ids(tokens)
+            masks = [1] * len(tokens)
+            segments = [0] * len(tokens)
+
+            dict_instance = {'label':labels_idx, 'tokens':tokens,
+                             "tokens_id":tokens_id, "segments":segments, "masks":masks}
+
+            instances.append(dict_instance)
 
     return instances
 
@@ -586,6 +605,7 @@ def pad_sequence(x, max_len, type=np.int):
 
     return padded_x
 
+from elmo.elmo import batch_to_ids
 def my_collate(x):
 
     words = [x_['tokens_id'] for x_ in x]
@@ -597,12 +617,27 @@ def my_collate(x):
 
     labels = [x_['label'] for x_ in x]
 
-    positions = [list(range(1, len+1)) for len in seq_len]
-    positions = pad_sequence(positions, max_seq_len)
+    text_inputs = [x_['tokens'] for x_ in x]
+    text_inputs = batch_to_ids(text_inputs)
 
-    text_inputs = [x_['tokens']+ ['<pad>']* (max_seq_len - len(x_['tokens'])) for x_ in x]
+    return inputs_id, labels, text_inputs
 
-    return inputs_id, labels, positions, text_inputs
+def my_collate_bert(x):
+
+    words = [x_['tokens_id'] for x_ in x]
+    segments = [x_['segments'] for x_ in x]
+    masks = [x_['masks'] for x_ in x]
+
+    seq_len = [len(w) for w in words]
+    max_seq_len = max(seq_len)
+
+    inputs_id = pad_sequence(words, max_seq_len)
+    segments = pad_sequence(segments, max_seq_len)
+    masks = pad_sequence(masks, max_seq_len)
+
+    labels = [x_['label'] for x_ in x]
+
+    return inputs_id, segments, masks, labels
 
 
 def early_stop(metrics_hist, criterion, patience):
@@ -624,18 +659,11 @@ def save_metrics(metrics_hist_all, model_dir):
         data.update({"%s_tr" % (name):val for (name,val) in metrics_hist_all[2].items()})
         json.dump(data, metrics_file, indent=1)
 
-def save_params_dict(params):
-    with open(params["model_dir"] + "/params.json", 'w') as params_file:
-        json.dump(params, params_file, indent=1)
 
 import torch
 def save_everything(args, metrics_hist_all, model, model_dir, params, criterion, evaluate=False):
-    """
-        Save metrics, model, params all in model_dir
-    """
+
     save_metrics(metrics_hist_all, model_dir)
-    params['model_dir'] = model_dir
-    save_params_dict(params)
 
     if not evaluate:
         #save the model with the best criterion metric
@@ -832,3 +860,161 @@ def all_metrics(yhat, y, k=8, yhat_raw=None, calc_auc=True):
         metrics.update(roc_auc)
 
     return metrics
+
+
+def _readString(f, code):
+    # s = unicode()
+    s = str()
+    c = f.read(1)
+    value = ord(c)
+
+    while value != 10 and value != 32:
+        if 0x00 < value < 0xbf:
+            continue_to_read = 0
+        elif 0xC0 < value < 0xDF:
+            continue_to_read = 1
+        elif 0xE0 < value < 0xEF:
+            continue_to_read = 2
+        elif 0xF0 < value < 0xF4:
+            continue_to_read = 3
+        else:
+            raise RuntimeError("not valid utf-8 code")
+
+        i = 0
+        # temp = str()
+        # temp = temp + c
+
+        temp = bytes()
+        temp = temp + c
+
+        while i<continue_to_read:
+            temp = temp + f.read(1)
+            i += 1
+
+        temp = temp.decode(code)
+        s = s + temp
+
+        c = f.read(1)
+        value = ord(c)
+
+    return s
+
+import struct
+def _readFloat(f):
+    bytes4 = f.read(4)
+    f_num = struct.unpack('f', bytes4)[0]
+    return f_num
+
+def load_pretrain_emb(embedding_path):
+    embedd_dim = -1
+    embedd_dict = dict()
+
+    # emb_debug = []
+    if embedding_path.find('.bin') != -1:
+        with open(embedding_path, 'rb') as f:
+            wordTotal = int(_readString(f, 'utf-8'))
+            embedd_dim = int(_readString(f, 'utf-8'))
+
+            for i in range(wordTotal):
+                word = _readString(f, 'utf-8')
+                # emb_debug.append(word)
+
+                word_vector = []
+                for j in range(embedd_dim):
+                    word_vector.append(_readFloat(f))
+                word_vector = np.array(word_vector, np.float)
+
+                f.read(1)  # a line break
+
+                embedd_dict[word] = word_vector
+
+    else:
+        with codecs.open(embedding_path, 'r', 'UTF-8') as file:
+            for line in file:
+                # logging.info(line)
+                line = line.strip()
+                if len(line) == 0:
+                    continue
+                # tokens = line.split()
+                tokens = re.split(r"\s+", line)
+                if len(tokens) == 2:
+                    continue # it's a head
+                if embedd_dim < 0:
+                    embedd_dim = len(tokens) - 1
+                else:
+                    # assert (embedd_dim + 1 == len(tokens))
+                    if embedd_dim + 1 != len(tokens):
+                        continue
+                embedd = np.zeros([1, embedd_dim])
+                embedd[:] = tokens[1:]
+                embedd_dict[tokens[0]] = embedd
+
+
+    return embedd_dict, embedd_dim
+
+def norm2one(vec):
+    root_sum_square = np.sqrt(np.sum(np.square(vec)))
+    return vec/root_sum_square
+
+def build_pretrain_embedding(embedding_path, word_alphabet, norm):
+
+    embedd_dict, embedd_dim = load_pretrain_emb(embedding_path)
+
+    scale = np.sqrt(3.0 / embedd_dim)
+    pretrain_emb = np.zeros([len(word_alphabet)+2, embedd_dim], dtype=np.float32)  # add UNK (last) and PAD (0)
+    perfect_match = 0
+    case_match = 0
+    digits_replaced_with_zeros_found = 0
+    lowercase_and_digits_replaced_with_zeros_found = 0
+    not_match = 0
+    for word, index in word_alphabet.items():
+        if word in embedd_dict:
+            if norm:
+                pretrain_emb[index,:] = norm2one(embedd_dict[word])
+            else:
+                pretrain_emb[index,:] = embedd_dict[word]
+            perfect_match += 1
+
+        elif word.lower() in embedd_dict:
+            if norm:
+                pretrain_emb[index,:] = norm2one(embedd_dict[word.lower()])
+            else:
+                pretrain_emb[index,:] = embedd_dict[word.lower()]
+            case_match += 1
+
+        elif re.sub('\d', '0', word) in embedd_dict:
+            if norm:
+                pretrain_emb[index,:] = norm2one(embedd_dict[re.sub('\d', '0', word)])
+            else:
+                pretrain_emb[index,:] = embedd_dict[re.sub('\d', '0', word)]
+            digits_replaced_with_zeros_found += 1
+
+        elif re.sub('\d', '0', word.lower()) in embedd_dict:
+            if norm:
+                pretrain_emb[index,:] = norm2one(embedd_dict[re.sub('\d', '0', word.lower())])
+            else:
+                pretrain_emb[index,:] = embedd_dict[re.sub('\d', '0', word.lower())]
+            lowercase_and_digits_replaced_with_zeros_found += 1
+
+        else:
+            if norm:
+                pretrain_emb[index, :] = norm2one(np.random.uniform(-scale, scale, [1, embedd_dim]))
+            else:
+                pretrain_emb[index,:] = np.random.uniform(-scale, scale, [1, embedd_dim])
+            not_match += 1
+
+    # initialize pad and unknown
+    pretrain_emb[0, :] = np.zeros([1, embedd_dim], dtype=np.float32)
+    if norm:
+        pretrain_emb[-1, :] = norm2one(np.random.uniform(-scale, scale, [1, embedd_dim]))
+    else:
+        pretrain_emb[-1, :] = np.random.uniform(-scale, scale, [1, embedd_dim])
+
+
+    print("pretrained word emb size {}".format(len(embedd_dict)))
+    print("prefect match:%.2f%%, case_match:%.2f%%, dig_zero_match:%.2f%%, "
+                 "case_dig_zero_match:%.2f%%, not_match:%.2f%%"
+                 %(perfect_match*100.0/len(word_alphabet), case_match*100.0/len(word_alphabet), digits_replaced_with_zeros_found*100.0/len(word_alphabet),
+                   lowercase_and_digits_replaced_with_zeros_found*100.0/len(word_alphabet), not_match*100.0/len(word_alphabet)))
+
+    return pretrain_emb, embedd_dim

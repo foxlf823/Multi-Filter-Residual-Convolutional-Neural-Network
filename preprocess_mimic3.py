@@ -1,14 +1,13 @@
-import sys
-sys.path.append('../')
 
-from options import args
-from utils import build_vocab, word_embeddings, fasttext_embeddings, gensim_to_fasttext_embeddings, gensim_to_embeddings, \
-    reformat, write_discharge_summaries, concat_data, split_data
 import pandas as pd
-
 from collections import Counter, defaultdict
 import csv
 import operator
+from options import args
+from utils import build_vocab, word_embeddings, fasttext_embeddings, gensim_to_fasttext_embeddings, gensim_to_embeddings, \
+    reformat, write_discharge_summaries, concat_data, split_data
+
+
 
 Y = 'full'
 notes_file = '%s/NOTEEVENTS.csv' % args.MIMIC_3_DIR
