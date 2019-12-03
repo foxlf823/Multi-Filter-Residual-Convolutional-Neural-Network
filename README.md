@@ -8,7 +8,7 @@ The repo can be used to reproduce the results in the [paper](https://arxiv.org/a
      title={ICD Coding from Clinical Text Using Multi-Filter Residual Convolutional Neural Network},  
      author={Li, Fei and Yu, Hong},  
      booktitle={Proceedings of the Thirty-Fourth AAAI Conference on Artificial Intelligence},
-     year={2019}  
+     year={2020}  
     }
 
 Setup
