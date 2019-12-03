@@ -2,7 +2,14 @@
 
 The Multi Filter Residual Convolutional Neural Network (MultiResCNN) is built based on [TextCNN](https://github.com/yoonkim/CNN_sentence), [Residual Network](https://github.com/KaimingHe/deep-residual-networks) and [CAML](https://github.com/jamesmullenbach/caml-mimic).
 It could be used as a strong baseline model for text classification. 
-The repo can be used to reproduce the results in the paper:
+The repo can be used to reproduce the results in the [paper](https://arxiv.org/abs/1912.00862):
+
+    @inproceedings{li2020multirescnn,  
+     title={ICD Coding from Clinical Text Using Multi-Filter Residual Convolutional Neural Network},  
+     author={Li, Fei and Yu, Hong},  
+     booktitle={Proceedings of the Thirty-Fourth AAAI Conference on Artificial Intelligence},
+     year={2019}  
+    }
 
 Setup
 -----
