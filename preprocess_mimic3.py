@@ -84,6 +84,10 @@ fname = '%s/notes_labeled.csv' % args.MIMIC_3_DIR
 base_name = "%s/disch" % args.MIMIC_3_DIR #for output
 tr, dv, te = split_data(fname, base_name, args.MIMIC_3_DIR)
 
+vocab_min = 3
+vname = '%s/vocab.csv' % args.MIMIC_3_DIR
+build_vocab(vocab_min, tr, vname)
+
 # step 7: sort data by its note length, add length to the last column
 for splt in ['train', 'dev', 'test']:
     filename = '%s/disch_%s_split.csv' % (args.MIMIC_3_DIR, splt)
