@@ -65,7 +65,7 @@ mkl-fft==1.0.10
 mkl-random==1.0.2
 more-itertools==7.0.0
 murmurhash==1.0.2
-nltk==3.4.3
+nltk==3.4.5
 numpy==1.16.4
 numpydoc==0.9.1
 openpyxl==2.6.2
