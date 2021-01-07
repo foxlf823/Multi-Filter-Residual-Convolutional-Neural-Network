@@ -56,7 +56,7 @@ jsonnet==0.13.0
 jsonpickle==1.2
 jsonschema==3.0.1
 kiwisolver==1.1.0
-lxml==4.3.3
+lxml==4.6.2
 MarkupSafe==1.1.1
 marshmallow==2.6.1
 marshmallow-jsonapi==0.15.1
